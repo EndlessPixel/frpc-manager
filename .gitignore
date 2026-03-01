@@ -16,7 +16,8 @@ frpc_backups/
 *.bak
 
 # Configuration versions
-.json
+*.json
+*.ini
 
 # IDE files
 .vscode/
