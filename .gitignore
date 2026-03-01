@@ -1,0 +1,52 @@
+# FRPC Manager - Git Ignore File
+
+# Executable files
+frpc
+*.exe
+
+# Generated scripts
+*.bat
+*.sh
+
+# Log files
+*.log
+
+# Backup files
+frpc_backups/
+*.bak
+
+# Configuration versions
+.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python files
+__pycache__/
+*.pyc
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Export files
+frpc_configs_export_*.md
+
+# Downloaded files
+frp_*.zip
+frp_*.tar.gz

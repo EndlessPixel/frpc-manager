@@ -1,4 +1,4 @@
-import os, sys, re, json, tomllib, yaml, shutil, zipfile, tarfile, platform, subprocess, tempfile, threading, traceback, logging, asyncio, aiofiles, hashlib
+import os, sys, re, json, tomllib, yaml, shutil, zipfile, tarfile, platform, subprocess, tempfile, threading, traceback, logging, asyncio, aiofiles, hashlib, urllib.request
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from urllib.request import urlretrieve
@@ -753,6 +753,60 @@ async def async_start_frpc(config_file: str, generate_script: bool = False):
         except Exception as e:
             logger.error(f"生成启动脚本失败: {e}")
     
+    # 询问运行模式
+    print("\n请选择运行模式:")
+    print("1. 前台运行 (随主程序结束一起结束)")
+    print("2. 后台运行 (与主程序脱离，需手动结束进程)")
+    
+    while True:
+        mode_choice = input("请输入数字选择: ").strip()
+        if mode_choice in ['1', '2']:
+            run_in_background = mode_choice == '2'
+            break
+        else:
+            print(f"{bcolors.WARNING}请输入有效的数字 (1-2){bcolors.ENDC}")
+    
+    if run_in_background:
+        print(f"\n{bcolors.OKBLUE}后台运行模式: frpc 将在后台运行，与主程序脱离{bcolors.ENDC}")
+        logger.info("用户选择后台运行模式")
+        
+        # 启动后台进程
+        cmd = [frpc_exec, "-c", config_file]
+        print(f"启动命令: {' '.join(cmd)}")
+        
+        # 跨平台后台运行
+        try:
+            if platform.system() == "Windows":
+                # Windows 后台运行
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                subprocess.Popen(
+                    cmd,
+                    creationflags=creation_flags
+                )
+            else:
+                # Linux/macOS 后台运行
+                subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    close_fds=True,
+                    start_new_session=True
+                )
+            
+            print(f"{bcolors.OKGREEN}frpc 已在后台启动{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}注意: 后台运行的 frpc 不会随主程序结束而结束，请手动结束进程{bcolors.ENDC}")
+            logger.info("FRPC已在后台启动")
+            return
+        except Exception as e:
+            logger.error(f"启动后台进程失败: {e}", exc_info=True)
+            print(f"{bcolors.FAIL}启动失败: {e}{bcolors.ENDC}")
+            return
+    
+    # 前台运行模式
+    print(f"\n{bcolors.OKBLUE}前台运行模式: frpc 将随主程序结束一起结束{bcolors.ENDC}")
+    logger.info("用户选择前台运行模式")
+    
     # 主启动循环
     try:
         while not runtime_info.stop_flag and runtime_info.restart_count < runtime_info.max_restarts:
@@ -882,20 +936,95 @@ async def async_download_frpc(max_retries: int = 3, timeout: int = 30) -> bool:
             return True
     
     # 下载文件（带重试）
-    url = FRPC_DOWNLOAD_URLS[download_key]
-    print(f"\n下载地址: {url}")
-    logger.info(f"FRPC下载地址: {url}")
+    original_url = FRPC_DOWNLOAD_URLS[download_key]
+    
+    # GitHub 代理列表
+    proxy_options = [
+        {"name": "原始 GitHub 地址", "url": original_url},
+        {"name": "gh-proxy.org (IPv4)", "url": f"https://gh-proxy.org/{original_url.replace('https://', '')}"},
+        {"name": "v6.gh-proxy.org (IPv6)", "url": f"https://v6.gh-proxy.org/{original_url.replace('https://', '')}"},
+        {"name": "hk.gh-proxy.org", "url": f"https://hk.gh-proxy.org/{original_url.replace('https://', '')}"},
+        {"name": "cdn.gh-proxy.org", "url": f"https://cdn.gh-proxy.org/{original_url.replace('https://', '')}"},
+        {"name": "edgeone.gh-proxy.org", "url": f"https://edgeone.gh-proxy.org/{original_url.replace('https://', '')}"},
+        {"name": "在浏览器中打开下载", "url": original_url, "browser": True}
+    ]
+    
+    # 询问用户选择下载源
+    print("\n请选择下载源:")
+    for i, option in enumerate(proxy_options, 1):
+        print(f"{i}. {option['name']}")
+    
+    while True:
+        choice = input("请输入数字选择: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(proxy_options):
+            selected_option = proxy_options[int(choice) - 1]
+            selected_url = selected_option["url"]
+            selected_name = selected_option["name"]
+            
+            # 检查是否需要在浏览器中打开
+            if selected_option.get("browser", False):
+                print(f"\n已选择: {selected_name}")
+                print(f"下载地址: {selected_url}")
+                logger.info(f"用户选择在浏览器中打开下载: {selected_url}")
+                
+                # 尝试打开浏览器
+                try:
+                    import webbrowser
+                    webbrowser.open(selected_url)
+                    print(f"{bcolors.OKGREEN}浏览器已打开，请在浏览器中完成下载{bcolors.ENDC}")
+                except Exception as e:
+                    logger.error(f"打开浏览器失败: {e}")
+                    print(f"{bcolors.WARNING}无法自动打开浏览器，请手动访问上述地址{bcolors.ENDC}")
+                
+                # 指导用户接下来的操作
+                print("\n接下来的操作步骤:")
+                print("1. 在浏览器中完成下载")
+                print(f"2. 找到下载的文件 ({os.path.basename(original_url)})")
+                print(f"3. 将文件解压到当前目录")
+                print(f"4. 确保 {frpc_file} 被提取到当前目录")
+                print("5. 回到本程序继续操作")
+                
+                input("\n当你完成上述步骤后，按 Enter 键继续...")
+                return True
+            else:
+                print(f"\n已选择: {selected_name}")
+                print(f"下载地址: {selected_url}")
+                logger.info(f"用户选择下载源: {selected_name}, 地址: {selected_url}")
+                break
+        else:
+            print(f"{bcolors.WARNING}请输入有效的数字 (1-{len(proxy_options)}){bcolors.ENDC}")
     
     temp_file = None
     try:
         for retry in range(max_retries):
             try:
                 print("开始下载...")
-                # 下载文件（带进度显示）
-                temp_file, _ = urlretrieve(url, reporthook=show_progress, timeout=timeout)
-                print()  # 换行
+                # ========== 核心修改部分开始 ==========
+                # 替换urlretrieve，改用urlopen实现下载（支持timeout）
+                temp_file = Path(os.path.basename(selected_url))
+                req = urllib.request.Request(selected_url)
                 
-                # 解压
+                with urllib.request.urlopen(req, timeout=timeout) as response, \
+                     open(temp_file, 'wb') as out_file:
+                    
+                    total_size = int(response.headers.get('Content-Length', 0))
+                    block_size = 8192  # 8KB块
+                    downloaded = 0
+                    
+                    while True:
+                        buffer = response.read(block_size)
+                        if not buffer:
+                            break
+                        out_file.write(buffer)
+                        downloaded += len(buffer)
+                        # 调用原有的进度显示函数
+                        show_progress(downloaded // block_size, block_size, total_size)
+                
+                print()  # 换行
+                temp_file = str(temp_file)
+                # ========== 核心修改部分结束 ==========
+                
+                # 解压（原有逻辑不变）
                 if is_zip:
                     with zipfile.ZipFile(temp_file, 'r') as zipf:
                         # 查找 frpc 文件
